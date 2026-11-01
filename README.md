@@ -4,7 +4,7 @@ API web d'un restaurant (la carte des plats), construite comme un service de pro
 métriques Prometheus, contrôle de santé, intégration continue, puis déploiement sur Kubernetes et sur le cloud.
 
 > Projet final d'un programme DevOps / Cloud. Les labs d'apprentissage sont dans
-> [DevOps-learning-labs](https://github.com/H-HABCHANE/DevOps-learning-labs).
+> [devops-infra-labs](https://github.com/H-HABCHANE/devops-infra-labs).
 
 ## Fonctionnalités
 
