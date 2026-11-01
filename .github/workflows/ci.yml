@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: hhabchane/restaurant-api
+
+jobs:
+  # 1. Le code est-il propre et correct ?
+  qualite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Tests (pytest)
+        run: python -m pytest -v
+
+  # 2. L'image démarre-t-elle et répond-elle comme un vrai service ?
+  image:
+    needs: qualite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Construire l'image
+        run: docker build -t "$IMAGE:test" .
+
+      - name: Démarrer le conteneur
+        run: docker run -d --name api -p 8000:8000 "$IMAGE:test"
+
+      - name: Attendre l'état healthy (HEALTHCHECK du Dockerfile)
+        run: |
+          for i in $(seq 1 20); do
+            etat=$(docker inspect --format '{{.State.Health.Status}}' api)
+            echo "essai $i : $etat"
+            [ "$etat" = "healthy" ] && exit 0
+            sleep 3
+          done
+          echo "::error::Le conteneur n'est jamais devenu healthy"
+          docker logs api
+          exit 1
+
+      - name: Tester l'API comme un client
+        run: |
+          curl -fsS localhost:8000/health
+          curl -fsS localhost:8000/plats | grep -q Couscous
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/plats/99)" = "404"
+          curl -fsS localhost:8000/metrics | grep -q http_requests_total
+          docker exec api id -u | grep -qv '^0$'   # l'appli ne doit pas tourner en root
+
+  # 3. Publier l'image, seulement après fusion sur main
+  publier:
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Vérifier les secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::Secret DOCKERHUB_USERNAME ou DOCKERHUB_TOKEN manquant (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
