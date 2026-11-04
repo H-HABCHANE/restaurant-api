@@ -1,0 +1,9 @@
+# Charger au démarrage tous les tableaux de bord JSON du dossier (tableaux de bord en code, versionnés).
+apiVersion: 1
+providers:
+  - name: restaurant
+    folder: Restaurant
+    type: file
+    allowUiUpdates: false          # la source de vérité est le fichier JSON dans Git
+    options:
+      path: /var/lib/grafana/dashboards
