@@ -7,11 +7,12 @@ RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 # --- Étape 2 : la « salle » : seulement ce qu'il faut pour servir ---
 FROM python:3.14-slim
 # Utilisateur sans privilèges : si l'appli est compromise, l'attaquant n'est pas root dans le conteneur.
+# UID numérique (et non le nom) : Kubernetes peut alors vérifier runAsNonRoot.
 RUN useradd --create-home --uid 10001 appli
 COPY --from=construction /opt/venv /opt/venv
 WORKDIR /app
 COPY app/ ./app/
-USER appli
+USER 10001:10001
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
