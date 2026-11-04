@@ -78,6 +78,27 @@ Scénarios testés :
   (`maxUnavailable: 0`) ; `rollout undo` rétablit la version précédente en quelques secondes, puis la correction passe
   par Git, qui reste la source de vérité.
 
+## Pile de production : API et supervision
+
+`deploy/` décrit, avec Docker Compose, le service tel qu'il tourne sur un serveur : l'API et sa supervision.
+Le même fichier sert en local et sur le serveur ; seules les variables du fichier `.env` changent.
+
+```bash
+cd deploy
+cp .env.exemple .env && chmod 600 .env    # puis définir GRAFANA_MOT_DE_PASSE (obligatoire)
+docker compose up -d
+```
+
+| Service | Accès | Rôle |
+|---|---|---|
+| `api` | `127.0.0.1:8000` (port 80 sur le serveur) | l'image publiée par la CI, taguée par SHA ; lecture seule, aucune capacité Linux |
+| `prometheus` | `127.0.0.1:9090` uniquement | relève `/metrics` toutes les 15 s, évalue les alertes |
+| `grafana` | `127.0.0.1:3000` uniquement | tableau de bord « signaux d'or », chargé depuis un fichier JSON versionné |
+
+Alertes (`deploy/alertes.yml`) : API indisponible depuis 1 min, plus de 5 % de réponses 5xx, latence p95 au-delà de
+500 ms. Les 404 (erreurs du client) restent visibles dans le trafic mais ne déclenchent pas d'alerte.
+Prometheus et Grafana ne sont jamais exposés publiquement : sur le serveur, on y accède par un tunnel SSH.
+
 ## Structure
 
 ```
@@ -89,6 +110,7 @@ pyproject.toml         réglages de ruff et pytest
 Dockerfile             image multi-étapes, utilisateur sans privilèges, HEALTHCHECK
 .github/workflows/     CI : qualité (ruff, pytest) → image → publication sur Docker Hub (tag = SHA)
 k8s/                   manifestes Kubernetes : namespace, Deployment, Service
+deploy/                pile Docker Compose : API, Prometheus, alertes, Grafana (tableau de bord en JSON)
 ```
 
 ## Feuille de route
@@ -97,4 +119,4 @@ k8s/                   manifestes Kubernetes : namespace, Deployment, Service
 - [x] Image Docker et pipeline GitHub Actions (lint, tests, build, publication)
 - [x] Déploiement Kubernetes (Minikube) : 3 replicas, Service, probes
 - [ ] Infrastructure as Code : Terraform (serveur) + Ansible (configuration)
-- [ ] Supervision : Prometheus, Grafana, alertes
+- [x] Supervision : Prometheus, Grafana, alertes

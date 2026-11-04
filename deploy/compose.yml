@@ -1,0 +1,45 @@
+# Pile de production sur un seul serveur : l'API + sa supervision.
+# Même fichier en local et sur l'EC2 : seules les variables du fichier .env changent.
+name: restaurant   # nom du projet Compose : conteneurs restaurant-api-1, restaurant-prometheus-1...
+services:
+  api:
+    image: hhabchane/restaurant-api:${API_TAG:-3e810a3ddacd971c4a567be92b607ef82ca5fc85}  # SHA, jamais latest
+    ports:
+      - "${API_PUBLICATION:-127.0.0.1:8000}:8000"   # en local : PC seulement ; sur l'EC2 : 80 (public)
+    read_only: true                  # aucune écriture sur le disque du conteneur
+    cap_drop: [ALL]                  # aucune capacité Linux
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    ports:
+      - "127.0.0.1:9090:9090"        # jamais public : accès par tunnel SSH sur l'EC2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d   # petit serveur : 7 jours d'historique suffisent
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alertes.yml:/etc/prometheus/alertes.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    ports:
+      - "127.0.0.1:3000:3000"        # jamais public : accès par tunnel SSH sur l'EC2
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_MOT_DE_PASSE:?définir GRAFANA_MOT_DE_PASSE dans .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro   # source de données et tableaux de bord en code
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
