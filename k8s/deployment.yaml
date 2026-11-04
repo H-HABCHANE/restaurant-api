@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restaurant-api
+  namespace: restaurant
+  labels:
+    app: restaurant-api
+spec:
+  replicas: 3                       # 3 copies du service : une peut tomber sans coupure
+  selector:
+    matchLabels:
+      app: restaurant-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0             # pendant une mise à jour, jamais moins de 3 pods prêts
+      maxSurge: 1                   # on ajoute 1 pod neuf à la fois
+  template:
+    metadata:
+      labels:
+        app: restaurant-api
+    spec:
+      securityContext:
+        runAsNonRoot: true          # Kubernetes refuse de lancer le conteneur s'il tourne en root
+        runAsUser: 10001            # UID numérique : avec un simple nom (USER appli), Kubernetes
+        runAsGroup: 10001           # ne peut pas vérifier que ce n'est pas root et refuse le pod
+      containers:
+        - name: api
+          # Toujours une version précise (SHA du commit), jamais « latest »
+          image: hhabchane/restaurant-api:d2236fa04cb3136fb464f246b2b5942773a069f8
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:               # ce que Kubernetes réserve pour placer le pod
+              cpu: 50m
+              memory: 64Mi
+            limits:                 # le plafond : au-delà de la mémoire, le pod est tué (OOMKilled)
+              cpu: 250m
+              memory: 128Mi
+          readinessProbe:           # « es-tu prêt à recevoir des clients ? » (sinon retiré du Service)
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:            # « es-tu encore vivant ? » (sinon redémarré)
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
