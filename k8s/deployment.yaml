@@ -44,11 +44,16 @@ spec:
               port: http
             initialDelaySeconds: 2
             periodSeconds: 5
-          livenessProbe:            # « es-tu encore vivant ? » (sinon redémarré)
+          startupProbe:             # délai de grâce au démarrage : jusqu'à 30 x 2 s = 60 s pour démarrer ;
+            httpGet:                # tant qu'elle n'a pas réussi, la liveness n'est pas lancée
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:            # « es-tu encore vivant ? » (sinon redémarré), active après la startupProbe
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
           securityContext:
