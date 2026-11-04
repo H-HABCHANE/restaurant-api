@@ -27,7 +27,7 @@ spec:
       containers:
         - name: api
           # Toujours une version précise (SHA du commit), jamais « latest »
-          image: hhabchane/restaurant-api:d2236fa04cb3136fb464f246b2b5942773a069f8
+          image: hhabchane/restaurant-api:3e810a3ddacd971c4a567be92b607ef82ca5fc85
           ports:
             - name: http
               containerPort: 8000

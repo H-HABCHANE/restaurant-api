@@ -55,9 +55,28 @@ curl localhost:8080/health
 Deux problèmes rencontrés et corrigés au premier déploiement :
 
 - `CreateContainerConfigError` : avec `runAsNonRoot`, une image déclarant un utilisateur par son **nom** (`USER appli`)
-  est refusée, car Kubernetes ne peut pas vérifier que ce n'est pas root ; l'UID est désormais donné en nombre.
+  est refusée, car Kubernetes ne peut pas vérifier que ce n'est pas root ; l'UID est désormais donné en nombre, dans
+  le Deployment et dans l'image (`USER 10001:10001`).
 - démarrage d'environ 25 s sous la limite de 250m CPU : la readiness a empêché tout trafic vers les pods pas encore
-  prêts.
+  prêts, puis une `startupProbe` a été ajoutée.
+
+### Mises à jour et retour arrière
+
+```bash
+# nouvelle version : changer le tag (SHA publié par la CI) dans k8s/deployment.yaml, puis
+kubectl apply -f k8s/ && kubectl -n restaurant rollout status deployment/restaurant-api --timeout=120s
+kubectl -n restaurant rollout history deployment/restaurant-api
+kubectl -n restaurant rollout undo deployment/restaurant-api        # retour à la révision précédente
+kubectl diff -f k8s/                                                 # le cluster correspond-il au dépôt ?
+```
+
+Scénarios testés :
+
+- **pod supprimé** : recréé aussitôt par le Deployment ; le Service ne route que vers les pods prêts, aucune erreur.
+- **démarrage lent** : une `startupProbe` (jusqu'à 60 s) protège le pod de la liveness pendant le démarrage.
+- **image inexistante** déployée par erreur : un seul pod en `ImagePullBackOff`, les trois anciens continuent de servir
+  (`maxUnavailable: 0`) ; `rollout undo` rétablit la version précédente en quelques secondes, puis la correction passe
+  par Git, qui reste la source de vérité.
 
 ## Structure
 
