@@ -1,0 +1,5 @@
+# Un « espace de rangement » dédié au projet : on peut tout lister ou tout supprimer d'un coup.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: restaurant

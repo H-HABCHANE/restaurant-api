@@ -1,0 +1,14 @@
+# Le comptoir unique : une adresse stable qui répartit les clients entre les pods PRÊTS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: restaurant-api
+  namespace: restaurant
+spec:
+  type: ClusterIP                   # interne au cluster ; accès depuis le PC par port-forward
+  selector:
+    app: restaurant-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
