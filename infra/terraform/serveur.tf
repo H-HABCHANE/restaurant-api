@@ -5,6 +5,12 @@ resource "aws_instance" "serveur" {
   vpc_security_group_ids = [aws_security_group.serveur.id]
   key_name               = aws_key_pair.deploiement.key_name
 
+  # Par défaut, une t3 est en crédits CPU « unlimited » : un usage soutenu au-delà des crédits est facturé.
+  # « standard » : au pire la machine est ralentie, jamais de surplus sur la facture.
+  credit_specification {
+    cpu_credits = "standard"
+  }
+
   metadata_options {
     http_tokens = "required" # IMDSv2 obligatoire
   }

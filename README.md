@@ -6,6 +6,46 @@ métriques Prometheus, contrôle de santé, intégration continue, puis déploie
 > Projet final d'un programme DevOps / Cloud. Les labs d'apprentissage sont dans
 > [devops-infra-labs](https://github.com/H-HABCHANE/devops-infra-labs).
 
+## Architecture
+
+```
+   développeur ──PR──► GitHub ──► GitHub Actions : ruff, pytest → build de l'image → test du conteneur (santé, non-root)
+                                        │ après fusion sur main
+                                        ▼
+                                 Docker Hub : hhabchane/restaurant-api:<SHA du commit>
+                                        │
+                 ┌──────────────────────┴───────────────────────┐
+                 ▼                                              ▼
+   Kubernetes (Minikube)                              AWS eu-west-3 (Terraform → Ansible)
+   3 replicas, probes, mise à jour                    EC2 : API publique en HTTP
+   progressive sans coupure, rollback                 + Prometheus et Grafana, accessibles
+                                                        seulement par tunnel SSH
+```
+
+## Ce que ce projet démontre
+
+- **Une chaîne de livraison complète** : chaque changement passe par une pull request vérifiée (lint, tests, image
+  démarrée et testée comme un vrai service) ; `main` est protégée ; l'image publiée est taguée par le SHA du commit.
+- **Un déploiement sans coupure et réversible** : mise à jour progressive (`maxUnavailable: 0`), image inexistante
+  contenue sur un seul pod, retour arrière en une commande, Git comme source de vérité (`kubectl diff`).
+- **L'infrastructure en code** : serveur, réseau et règles de pare-feu décrits avec Terraform (plan relu avant
+  chaque application), configuration idempotente avec Ansible (second passage sans changement), destruction vérifiée.
+- **La supervision** : métriques applicatives (trafic, erreurs, latence) exposées par l'API, alertes sur les signaux
+  d'or, tableau de bord versionné en JSON.
+- **La sécurité par défaut** : conteneur non-root à UID numérique, système de fichiers en lecture seule, aucune
+  capacité Linux, secrets hors de Git, SSH limité à une adresse, supervision jamais exposée, identifiants AWS
+  temporaires.
+
+### Problèmes rencontrés et résolus
+
+| Problème | Cause | Correction |
+|---|---|---|
+| pods en `CreateContainerConfigError` | `runAsNonRoot` avec un utilisateur déclaré par son nom | UID numérique dans l'image et le Deployment |
+| pods prêts au bout de 25 s seulement | limite de 250m CPU au démarrage de Python | readiness, puis `startupProbe` |
+| version inexistante déployée | faute de frappe dans le tag | un seul pod touché, `rollout undo` |
+| conflit de noms de conteneurs | `container_name` fixe, déjà utilisé ailleurs | noms préfixés par le projet Compose |
+| risque de surplus facturé sur le CPU | t3 en mode `unlimited` par défaut, repéré en relisant le plan de destruction | `cpu_credits = "standard"` |
+
 ## Fonctionnalités
 
 | Route | Rôle |
@@ -159,6 +199,8 @@ deploy/                pile Docker Compose : API, Prometheus, alertes, Grafana (
 
 - [x] API FastAPI, `/health`, `/metrics`, tests
 - [x] Image Docker et pipeline GitHub Actions (lint, tests, build, publication)
-- [x] Déploiement Kubernetes (Minikube) : 3 replicas, Service, probes
+- [x] Déploiement Kubernetes (Minikube) : 3 replicas, Service, probes, mise à jour et retour arrière
 - [x] Infrastructure as Code : Terraform (serveur) + Ansible (configuration)
 - [x] Supervision : Prometheus, Grafana, alertes
+- [ ] Pistes : HTTPS (reverse proxy et certificat), Alertmanager vers une messagerie, déploiement continu depuis la CI,
+  state Terraform distant (S3 avec verrouillage)
