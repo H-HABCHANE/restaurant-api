@@ -1,0 +1,98 @@
+# Installe Docker sur le serveur et y lance la pile de deploy/ (API + Prometheus + Grafana).
+- name: Déployer restaurant-api
+  hosts: serveurs
+  become: true
+  vars:
+    dossier: /opt/restaurant
+    source: "{{ playbook_dir }}/../../deploy"
+    api_tag: 3e810a3ddacd971c4a567be92b607ef82ca5fc85
+    # Le secret n'est jamais dans Git : il vient de l'environnement de celui qui lance le playbook.
+    grafana_mot_de_passe: "{{ lookup('ansible.builtin.env', 'GRAFANA_MOT_DE_PASSE') }}"
+
+  pre_tasks:
+    - name: Vérifier que le mot de passe Grafana est fourni
+      ansible.builtin.assert:
+        that: grafana_mot_de_passe | length >= 16
+        fail_msg: "Exporter GRAFANA_MOT_DE_PASSE (16 caractères minimum) avant de lancer le playbook."
+      no_log: true
+
+    - name: Attendre que le serveur ait fini de démarrer (cloud-init)
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+
+  tasks:
+    - name: Installer Docker et le plugin Compose (paquets Ubuntu)
+      ansible.builtin.apt:
+        name: [docker.io, docker-compose-v2]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Démarrer Docker et l'activer au démarrage
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Créer les dossiers de la pile
+      ansible.builtin.file:
+        path: "{{ dossier }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: ["", grafana]
+
+    # Liste explicite : on ne copie surtout pas tout deploy/ (il contient le .env local avec un mot de passe).
+    - name: Copier la configuration de Compose et de Prometheus
+      ansible.builtin.copy:
+        src: "{{ source }}/{{ item }}"
+        dest: "{{ dossier }}/{{ item }}"
+        mode: "0644"
+      loop: [compose.yml, prometheus.yml, alertes.yml]
+      notify: Appliquer la pile
+
+    - name: Copier le provisioning et les tableaux de bord Grafana
+      ansible.builtin.copy:
+        src: "{{ source }}/grafana/"
+        dest: "{{ dossier }}/grafana/"
+        mode: "0644"
+        directory_mode: "0755"
+      notify: Appliquer la pile
+
+    - name: Écrire le fichier .env (secret, lisible par root seulement)
+      ansible.builtin.template:
+        src: templates/env.j2
+        dest: "{{ dossier }}/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      notify: Appliquer la pile
+
+    - name: Appliquer tout de suite les changements de configuration
+      ansible.builtin.meta: flush_handlers
+
+    - name: Démarrer la pile (crée seulement ce qui manque)
+      ansible.builtin.command:
+        cmd: docker compose up -d --wait
+        chdir: "{{ dossier }}"
+      register: demarrage
+      changed_when: demarrage.stderr is search('Created|Recreated|Started')
+
+  handlers:
+    # Un fichier de configuration monté seul garde l'ancien inode dans le conteneur (piège du Jour 7) :
+    # après un changement de configuration, on recrée les conteneurs pour qu'ils relisent les fichiers.
+    - name: Appliquer la pile
+      ansible.builtin.command:
+        cmd: docker compose up -d --wait --force-recreate
+        chdir: "{{ dossier }}"
+
+  post_tasks:
+    - name: Vérifier l'API depuis le serveur
+      ansible.builtin.uri:
+        url: http://localhost/health
+        return_content: true
+      register: sante
+      failed_when: sante.json.status != "ok"
+      retries: 10
+      delay: 3
+      until: sante is succeeded
