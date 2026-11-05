@@ -99,6 +99,46 @@ Alertes (`deploy/alertes.yml`) : API indisponible depuis 1 min, plus de 5 % de r
 500 ms. Les 404 (erreurs du client) restent visibles dans le trafic mais ne déclenchent pas d'alerte.
 Prometheus et Grafana ne sont jamais exposés publiquement : sur le serveur, on y accède par un tunnel SSH.
 
+## Déploiement sur AWS : Terraform puis Ansible
+
+```
+Internet ──HTTP 80──► EC2 t3.micro (Ubuntu 24.04, eu-west-3)
+                        ├─ api         ← image publiée par la CI (tag = SHA)
+                        ├─ prometheus  ← 127.0.0.1:9090 seulement
+                        └─ grafana     ← 127.0.0.1:3000 seulement
+PC ──SSH 22 (une seule IP /32)──► tunnel vers Grafana et Prometheus
+```
+
+`infra/terraform` crée le réseau (VPC, sous-réseau public, passerelle), le groupe de sécurité (HTTP public, SSH depuis
+une seule adresse) et l'instance (disque chiffré, IMDSv2), puis écrit l'inventaire Ansible. `infra/ansible` installe
+Docker et lance la pile de `deploy/`.
+
+```bash
+aws login --remote --region eu-west-3                 # identifiants temporaires, utilisateur IAM
+cd infra/terraform
+terraform init
+terraform plan -var "mon_ip=$(curl -s https://checkip.amazonaws.com)/32" -out=projet.tfplan
+terraform apply projet.tfplan
+
+cd ../ansible
+set -a && . ../../deploy/.env && set +a               # le mot de passe Grafana vient de l'environnement
+ansible-playbook site.yml                             # 2e passage : changed=0
+curl http://<ip_publique>/health
+
+# supervision, sans ouvrir aucun port : sortie « tunnel_supervision » de Terraform
+ssh -i ~/.ssh/cle-ansible -N -L 3001:localhost:3000 -L 9091:localhost:9090 ubuntu@<ip_publique>
+
+cd ../terraform && terraform plan -destroy -var "mon_ip=..." -out=destroy.tfplan && terraform apply destroy.tfplan
+```
+
+Points d'attention traités dans le playbook :
+
+- attente de la fin de `cloud-init` avant `apt` (sinon conflit de verrou sur une instance neuve) ;
+- copie des fichiers de `deploy/` par liste explicite, pour ne jamais envoyer un `.env` local ;
+- `.env` du serveur généré par modèle, lisible par root seulement, jamais affiché (`no_log`) ;
+- conteneurs recréés quand une configuration change (un fichier monté seul n'est pas relu après remplacement) ;
+- vérification finale de `/health` depuis le serveur ; second passage sans aucun changement.
+
 ## Structure
 
 ```
@@ -110,6 +150,8 @@ pyproject.toml         réglages de ruff et pytest
 Dockerfile             image multi-étapes, utilisateur sans privilèges, HEALTHCHECK
 .github/workflows/     CI : qualité (ruff, pytest) → image → publication sur Docker Hub (tag = SHA)
 k8s/                   manifestes Kubernetes : namespace, Deployment, Service
+infra/terraform/       serveur AWS (réseau, sécurité, instance) et inventaire Ansible généré
+infra/ansible/         installation de Docker et lancement de la pile sur le serveur
 deploy/                pile Docker Compose : API, Prometheus, alertes, Grafana (tableau de bord en JSON)
 ```
 
@@ -118,5 +160,5 @@ deploy/                pile Docker Compose : API, Prometheus, alertes, Grafana (
 - [x] API FastAPI, `/health`, `/metrics`, tests
 - [x] Image Docker et pipeline GitHub Actions (lint, tests, build, publication)
 - [x] Déploiement Kubernetes (Minikube) : 3 replicas, Service, probes
-- [ ] Infrastructure as Code : Terraform (serveur) + Ansible (configuration)
+- [x] Infrastructure as Code : Terraform (serveur) + Ansible (configuration)
 - [x] Supervision : Prometheus, Grafana, alertes
